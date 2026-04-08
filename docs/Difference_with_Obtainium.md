@@ -14,7 +14,7 @@ The main list is where you live. ObtainX rebuilt it around **clarity and speed**
 <img src="https://github.com/user-attachments/assets/a3155b9e-3c7c-4b63-86cb-fc5cff5b4a73" alt="Obtainium apps list" width="300" /><br /><strong>Obtainium</strong>
 </td>
 <td width="50%" align="center" valign="top">
-<img src="https://github.com/user-attachments/assets/e645a8d4-43c2-42e4-b8e5-9535e1583fc2" alt="ObtainX apps list" width="300" /><br /><strong>ObtainX</strong>
+<img src="../assets/screenshots/1.apps.webp" alt="ObtainX apps list" width="300" /><br /><strong>ObtainX</strong>
 </td>
 </tr>
 </table>
