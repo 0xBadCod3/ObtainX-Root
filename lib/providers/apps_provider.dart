@@ -2043,6 +2043,25 @@ class AppsProvider with ChangeNotifier {
         await saveApps([apps[file.appId]!.app]);
         return thirdPartyInstallSucceeded;
       }
+      if (settingsProvider.installerMode == 'root') {
+        final String rootPathsArg = [
+          file.file.path,
+          ...additionalAPKs.map((a) => a.file.path),
+        ].join(',');
+        bool rootInstallSucceeded = await installer.installApkRoot(
+          rootPathsArg,
+          installerPackageName: settingsProvider.rootPretendToBeGooglePlay
+              ? "com.android.vending"
+              : null,
+        );
+        if (rootInstallSucceeded) {
+          installReportedOk = true;
+          apps[file.appId]!.app.installedVersion =
+              apps[file.appId]!.app.latestVersion;
+        }
+        await saveApps([apps[file.appId]!.app]);
+        return rootInstallSucceeded;
+      }
       int? code;
       if (!settingsProvider.useShizuku) {
         var allAPKs = [file.file.path];
