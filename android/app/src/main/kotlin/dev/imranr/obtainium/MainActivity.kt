@@ -17,6 +17,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.system.Os
+import com.topjohnwu.superuser.Shell
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -121,6 +122,28 @@ class MainActivity : FlutterActivity() {
                         val targetActivity = call.argument<String>("activity")
                         val expectedPkgName = call.argument<String>("expectedPackageName")
                         launchInstallIntent(apkSourcePaths, targetPackage, targetActivity, expectedPkgName, result)
+                    } catch (ex: Exception) {
+                        result.error("INSTALL_ERROR", ex.message, null)
+                    }
+                }
+                "isRootAvailable" -> {
+                    Thread {
+                        try {
+                            val granted = Shell.getShell().isRoot
+                            runOnUiThread { result.success(granted) }
+                        } catch (e: Exception) {
+                            runOnUiThread { result.success(false) }
+                        }
+                    }.start()
+                }
+                "performRootInstall" -> {
+                    try {
+                        val pathArg = call.argument<String>("path")!!
+                        val apkSourcePaths = pathArg.split(',')
+                            .map { it.trim() }
+                            .filter { it.isNotEmpty() }
+                        val installerPackageName = call.argument<String>("installerPackageName")
+                        performRootInstall(apkSourcePaths, installerPackageName, result)
                     } catch (ex: Exception) {
                         result.error("INSTALL_ERROR", ex.message, null)
                     }
@@ -399,5 +422,83 @@ class MainActivity : FlutterActivity() {
             } catch (_: Exception) { }
         }
         return releaseFile
+    }
+
+    private fun performRootInstall(
+        apkSourcePaths: List<String>,
+        installerPackageName: String?,
+        methodResult: MethodChannel.Result
+    ) {
+        val apkFiles = apkSourcePaths.map { File(it) }
+        val totalSize = apkFiles.sumOf { it.length() }
+
+        Thread {
+            try {
+                val shell = Shell.getShell()
+                if (!shell.isRoot) {
+                    runOnUiThread {
+                        methodResult.error("INSTALL_ERROR", "Root access not available", null)
+                    }
+                    return@Thread
+                }
+                val createCmd = StringBuilder("pm install-create -r -g -S $totalSize")
+                if (!installerPackageName.isNullOrEmpty()) {
+                    createCmd.append(" -i ").append(installerPackageName)
+                }
+
+                val createResult = Shell.cmd(createCmd.toString()).exec()
+                if (!createResult.isSuccess) {
+                    runOnUiThread {
+                        methodResult.error("INSTALL_ERROR", createResult.out.joinToString("\n"), null)
+                    }
+                    return@Thread
+                }
+
+                val outLines: List<String> = createResult.out
+                val sessionId = outLines.firstOrNull()?.let { line: String ->
+                    Regex("\\[(\\d+)]").find(line)?.groupValues?.get(1)
+                }
+
+                if (sessionId == null) {
+                    runOnUiThread {
+                        methodResult.error("INSTALL_ERROR", "Failed to get session ID", null)
+                    }
+                    return@Thread
+                }
+
+                try {
+                    for ((index, file) in apkFiles.withIndex()) {
+                        val size = file.length()
+                        val name = "base" + if (index > 0) "_$index" else ""
+                        val writeResult = Shell.cmd(
+                            "cat \"${file.absolutePath}\" | pm install-write -S $size $sessionId \"$name\""
+                        ).exec()
+                        if (!writeResult.isSuccess) {
+                            throw Exception("Failed to write APK $name: ${writeResult.out.joinToString("\n")}")
+                        }
+                    }
+
+                    val commitResult = Shell.cmd("pm install-commit $sessionId").exec()
+                    if (commitResult.isSuccess) {
+                        runOnUiThread {
+                            methodResult.success(true)
+                        }
+                    } else {
+                        runOnUiThread {
+                            methodResult.error("INSTALL_ERROR", commitResult.out.joinToString("\n"), null)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Shell.cmd("pm install-abandon $sessionId").exec()
+                    runOnUiThread {
+                        methodResult.error("INSTALL_ERROR", e.message, null)
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    methodResult.error("INSTALL_ERROR", e.message, null)
+                }
+            }
+        }.start()
     }
 }
