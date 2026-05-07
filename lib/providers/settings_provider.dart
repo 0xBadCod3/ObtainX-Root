@@ -1228,6 +1228,15 @@ class SettingsProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  bool get rootPretendToBeGooglePlay {
+    return prefs?.getBool('rootPretendToBeGooglePlay') ?? false;
+  }
+
+  set rootPretendToBeGooglePlay(bool val) {
+    prefs?.setBool('rootPretendToBeGooglePlay', val);
+    notifyListeners();
+  }
+
   bool get useFGService {
     return prefs?.getBool('useFGService') ?? false;
   }
