@@ -441,7 +441,7 @@ class MainActivity : FlutterActivity() {
                     }
                     return@Thread
                 }
-                val createCmd = StringBuilder("pm install-create -r -g -S $totalSize")
+                val createCmd = StringBuilder("pm install-create -r -S $totalSize")
                 if (!installerPackageName.isNullOrEmpty()) {
                     createCmd.append(" -i ").append(installerPackageName)
                 }
