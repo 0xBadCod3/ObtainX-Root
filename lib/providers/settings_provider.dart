@@ -244,6 +244,10 @@ class SettingsProvider with ChangeNotifier {
     installerMode = useShizuku ? 'shizuku' : 'stock';
   }
 
+  bool get useRoot {
+    return installerMode == 'root';
+  }
+
   String? get legacyInstallerPackage {
     final value = prefs?.getString('legacyInstallerPackage');
     return (value != null && value.isNotEmpty) ? value : null;

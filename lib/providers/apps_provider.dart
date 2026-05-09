@@ -2043,7 +2043,7 @@ class AppsProvider with ChangeNotifier {
         await saveApps([apps[file.appId]!.app]);
         return thirdPartyInstallSucceeded;
       }
-      if (settingsProvider.installerMode == 'root') {
+      if (settingsProvider.useRoot) {
         final List<String> rootPaths = [
           file.file.path,
           ...additionalAPKs.map((a) => a.file.path),
