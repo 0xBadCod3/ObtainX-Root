@@ -2044,12 +2044,12 @@ class AppsProvider with ChangeNotifier {
         return thirdPartyInstallSucceeded;
       }
       if (settingsProvider.installerMode == 'root') {
-        final String rootPathsArg = [
+        final List<String> rootPaths = [
           file.file.path,
           ...additionalAPKs.map((a) => a.file.path),
-        ].join(',');
+        ];
         bool rootInstallSucceeded = await installer.installApkRoot(
-          rootPathsArg,
+          rootPaths,
           installerPackageName: settingsProvider.rootPretendToBeGooglePlay
               ? "com.android.vending"
               : null,

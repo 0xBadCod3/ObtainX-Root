@@ -91,12 +91,13 @@ Future<bool> isRootAvailable() async {
 }
 
 Future<bool> installApkRoot(
-  String apkFilePathsCommaSeparated, {
+  List<String> apkFilePaths, {
   String? installerPackageName,
 }) async {
   if (!Platform.isAndroid) return false;
-  final result = await _channel.invokeMethod<bool>('performRootInstall', <String, dynamic>{
-    'path': apkFilePathsCommaSeparated,
+  final result =
+      await _channel.invokeMethod<bool>('performRootInstall', <String, dynamic>{
+    'paths': apkFilePaths,
     'installerPackageName': installerPackageName,
   });
   return result ?? false;
