@@ -20,8 +20,9 @@ class InstallerAppInfo {
 
 Future<List<InstallerAppInfo>> getApkInstallerApps() async {
   if (!Platform.isAndroid) return [];
-  final rawList =
-      await _channel.invokeMethod<List<dynamic>>('queryApkInstallerActivities');
+  final rawList = await _channel.invokeMethod<List<dynamic>>(
+    'queryApkInstallerActivities',
+  );
   if (rawList == null) return [];
   return rawList.map((entry) {
     final map = Map<String, dynamic>.from(entry as Map);
@@ -50,13 +51,13 @@ Future<bool> installApkViaThirdParty(
   required String expectedPackageName,
 }) async {
   if (!Platform.isAndroid) return false;
-  final result =
-      await _channel.invokeMethod<bool>('launchInstallIntent', <String, dynamic>{
-    'path': apkFilePathsCommaSeparated,
-    'package': targetPackage,
-    'activity': targetActivity,
-    'expectedPackageName': expectedPackageName,
-  });
+  final result = await _channel
+      .invokeMethod<bool>('launchInstallIntent', <String, dynamic>{
+        'path': apkFilePathsCommaSeparated,
+        'package': targetPackage,
+        'activity': targetActivity,
+        'expectedPackageName': expectedPackageName,
+      });
   return result ?? false;
 }
 
@@ -71,10 +72,12 @@ Future<bool> installApkRoot(
   String? installerPackageName,
 }) async {
   if (!Platform.isAndroid) return false;
-  final result =
-      await _channel.invokeMethod<bool>('performRootInstall', <String, dynamic>{
-    'paths': apkFilePaths,
-    'installerPackageName': installerPackageName,
-  });
+  final result = await _channel.invokeMethod<bool>(
+    'performRootInstall',
+    <String, dynamic>{
+      'paths': apkFilePaths,
+      'installerPackageName': installerPackageName,
+    },
+  );
   return result ?? false;
 }
