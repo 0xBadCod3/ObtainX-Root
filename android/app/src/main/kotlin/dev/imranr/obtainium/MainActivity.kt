@@ -755,11 +755,10 @@ class MainActivity : FlutterActivity() {
                     for ((index, file) in apkFiles.withIndex()) {
                         val size = file.length()
                         val name = "base" + if (index > 0) "_$index" else ""
-                        val writeResult = Shell.cmd(
-                            "cat \"${file.absolutePath}\" | pm install-write -S $size $sessionId \"$name\""
-                        ).exec()
-                        if (!writeResult.isSuccess) {
-                            throw Exception("Failed to write APK $name: ${writeResult.out.joinToString("\n")}")
+                        Shell.getShell().execTask { stdin, _, _ ->
+                            stdin.write("pm install-write -S $size $sessionId $name -\n".toByteArray())
+                            stdin.flush()
+                            file.inputStream().use { it.copyTo(stdin) }
                         }
                     }
 
