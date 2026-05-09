@@ -2114,7 +2114,10 @@ class AppsProvider with ChangeNotifier {
             ? context
             : null;
         bool needBGWorkaround =
-            willBeSilent && context == null && !settingsProvider.useShizuku && !settingsProvider.useRoot;
+            willBeSilent &&
+            context == null &&
+            !settingsProvider.useShizuku &&
+            !settingsProvider.useRoot;
         bool shizukuPretendToBeGooglePlay =
             settingsProvider.shizukuPretendToBeGooglePlay ||
             apps[id]!.app.additionalSettings['shizukuPretendToBeGooglePlay'] ==
@@ -2221,7 +2224,10 @@ class AppsProvider with ChangeNotifier {
               throw ObtainiumError(tr('cancelled'));
           }
         }
-        if (!willBeSilent && context != null && !settingsProvider.useShizuku && !settingsProvider.useRoot) {
+        if (!willBeSilent &&
+            context != null &&
+            !settingsProvider.useShizuku &&
+            !settingsProvider.useRoot) {
           // ignore: use_build_context_synchronously
           await waitForUserToReturnToForeground(context);
         }
