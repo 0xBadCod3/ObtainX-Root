@@ -165,13 +165,9 @@ class MainActivity : FlutterActivity() {
                     }.start()
                 }
                 "performRootInstall" -> {
-                    try {
-                        val apkSourcePaths = call.argument<List<String>>("paths")!!
-                        val installerPackageName = call.argument<String>("installerPackageName")
-                        performRootInstall(apkSourcePaths, installerPackageName, result)
-                    } catch (ex: Exception) {
-                        result.error("INSTALL_ERROR", ex.message, null)
-                    }
+                    val apkSourcePaths = call.argument<List<String>>("paths")!!
+                    val installerPackageName = call.argument<String>("installerPackageName")
+                    performRootInstall(apkSourcePaths, installerPackageName, result)
                 }
                 else -> result.notImplemented()
             }
@@ -739,8 +735,7 @@ class MainActivity : FlutterActivity() {
                     return@Thread
                 }
 
-                val outLines: List<String> = createResult.out
-                val sessionId = outLines.firstOrNull()?.let { line: String ->
+                val sessionId = createResult.out.firstOrNull()?.let { line: String ->
                     Regex("\\[(\\d+)]").find(line)?.groupValues?.get(1)
                 }
 
@@ -755,7 +750,7 @@ class MainActivity : FlutterActivity() {
                     for ((index, file) in apkFiles.withIndex()) {
                         val size = file.length()
                         val name = "base" + if (index > 0) "_$index" else ""
-                        Shell.getShell().execTask { stdin, _, _ ->
+                        shell.execTask { stdin, _, _ ->
                             stdin.write("pm install-write -S $size $sessionId $name -\n".toByteArray())
                             stdin.flush()
                             file.inputStream().use { it.copyTo(stdin) }
