@@ -138,10 +138,7 @@ class MainActivity : FlutterActivity() {
                 }
                 "performRootInstall" -> {
                     try {
-                        val pathArg = call.argument<String>("path")!!
-                        val apkSourcePaths = pathArg.split(',')
-                            .map { it.trim() }
-                            .filter { it.isNotEmpty() }
+                        val apkSourcePaths = call.argument<List<String>>("paths")!!
                         val installerPackageName = call.argument<String>("installerPackageName")
                         performRootInstall(apkSourcePaths, installerPackageName, result)
                     } catch (ex: Exception) {
