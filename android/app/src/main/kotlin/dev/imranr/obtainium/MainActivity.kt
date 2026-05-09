@@ -484,6 +484,7 @@ class MainActivity : FlutterActivity() {
                             methodResult.success(true)
                         }
                     } else {
+                        Shell.cmd("pm install-abandon $sessionId").exec()
                         runOnUiThread {
                             methodResult.error("INSTALL_ERROR", commitResult.out.joinToString("\n"), null)
                         }
