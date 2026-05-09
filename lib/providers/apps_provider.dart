@@ -2209,7 +2209,7 @@ class AppsProvider with ChangeNotifier {
           if (!(await settingsProvider.getInstallPermission(enforce: false))) {
             throw ObtainiumError(tr('cancelled'));
           }
-        } else {
+        } else if (settingsProvider.useShizuku) {
           switch ((await ShizukuApkInstaller().checkPermission())!) {
             case 'services_not_found':
               throw ObtainiumError(tr('shizukuBinderNotFound'));
