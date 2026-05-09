@@ -95,10 +95,12 @@ Future<bool> installApkRoot(
   String? installerPackageName,
 }) async {
   if (!Platform.isAndroid) return false;
-  final result =
-      await _channel.invokeMethod<bool>('performRootInstall', <String, dynamic>{
-    'paths': apkFilePaths,
-    'installerPackageName': installerPackageName,
-  });
+  final result = await _channel.invokeMethod<bool>(
+    'performRootInstall',
+    <String, dynamic>{
+      'paths': apkFilePaths,
+      'installerPackageName': installerPackageName,
+    },
+  );
   return result ?? false;
 }
