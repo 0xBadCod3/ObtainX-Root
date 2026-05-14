@@ -1794,9 +1794,7 @@ class AppsProvider with ChangeNotifier {
         ];
         bool rootInstallSucceeded = await installer.installApkRoot(
           rootPaths,
-          installerPackageName: settingsProvider.rootPretendToBeGooglePlay
-              ? "com.android.vending"
-              : null,
+          pretendToBeGooglePlay: settingsProvider.rootPretendToBeGooglePlay,
         );
         if (rootInstallSucceeded) {
           installReportedOk = true;
