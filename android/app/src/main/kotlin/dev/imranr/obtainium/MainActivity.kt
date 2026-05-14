@@ -166,8 +166,8 @@ class MainActivity : FlutterActivity() {
                 }
                 "performRootInstall" -> {
                     val apkSourcePaths = call.argument<List<String>>("paths")!!
-                    val installerPackageName = call.argument<String>("installerPackageName")
-                    performRootInstall(apkSourcePaths, installerPackageName, result)
+                    val pretendToBeGooglePlay = call.argument<Boolean>("pretendToBeGooglePlay") ?: false
+                    performRootInstall(apkSourcePaths, pretendToBeGooglePlay, result)
                 }
                 else -> result.notImplemented()
             }
@@ -707,7 +707,7 @@ class MainActivity : FlutterActivity() {
 
     private fun performRootInstall(
         apkSourcePaths: List<String>,
-        installerPackageName: String?,
+        pretendToBeGooglePlay: Boolean,
         methodResult: MethodChannel.Result
     ) {
         val apkFiles = apkSourcePaths.map { File(it) }
@@ -723,8 +723,8 @@ class MainActivity : FlutterActivity() {
                     return@Thread
                 }
                 val createCmd = StringBuilder("pm install-create -r -S $totalSize")
-                if (!installerPackageName.isNullOrEmpty()) {
-                    createCmd.append(" -i ").append(installerPackageName)
+                if (pretendToBeGooglePlay) {
+                    createCmd.append(" -i com.android.vending")
                 }
 
                 val createResult = Shell.cmd(createCmd.toString()).exec()

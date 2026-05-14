@@ -92,14 +92,14 @@ Future<bool> isRootAvailable() async {
 
 Future<bool> installApkRoot(
   List<String> apkFilePaths, {
-  String? installerPackageName,
+  bool pretendToBeGooglePlay = false,
 }) async {
   if (!Platform.isAndroid) return false;
   final result = await _channel.invokeMethod<bool>(
     'performRootInstall',
     <String, dynamic>{
       'paths': apkFilePaths,
-      'installerPackageName': installerPackageName,
+      'pretendToBeGooglePlay': pretendToBeGooglePlay,
     },
   );
   return result ?? false;
