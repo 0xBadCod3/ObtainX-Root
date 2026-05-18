@@ -749,11 +749,40 @@ class MainActivity : FlutterActivity() {
                 try {
                     for ((index, file) in apkFiles.withIndex()) {
                         val size = file.length()
-                        val name = "base" + if (index > 0) "_$index" else ""
-                        shell.execTask { stdin, _, _ ->
-                            stdin.write("pm install-write -S $size $sessionId $name -\n".toByteArray())
-                            stdin.flush()
-                            file.inputStream().use { it.copyTo(stdin) }
+                        val apkName = "base_$index"
+                        val stdoutOutput = StringBuilder()
+                        val stderrOutput = StringBuilder()
+
+                        val process = Runtime.getRuntime().exec(
+                            arrayOf("su", "-c", "pm install-write -S $size $sessionId $apkName -")
+                        )
+
+                        val stdoutDrain = Thread {
+                            process.inputStream.bufferedReader().use {
+                                stdoutOutput.append(it.readText())
+                            }
+                        }
+                        val stderrDrain = Thread {
+                            process.errorStream.bufferedReader().use {
+                                stderrOutput.append(it.readText())
+                            }
+                        }
+                        stdoutDrain.start()
+                        stderrDrain.start()
+
+                        file.inputStream().use { it.copyTo(process.outputStream) }
+                        process.outputStream.close()
+
+                        process.waitFor()
+                        stdoutDrain.join()
+                        stderrDrain.join()
+
+                        if (process.exitValue() != 0) {
+                            val details = listOf(stdoutOutput, stderrOutput)
+                                .filter { it.isNotBlank() }
+                                .joinToString("\n")
+                                .ifBlank { "exit code ${process.exitValue()}" }
+                            throw Exception("Failed to write APK $apkName: $details")
                         }
                     }
 
