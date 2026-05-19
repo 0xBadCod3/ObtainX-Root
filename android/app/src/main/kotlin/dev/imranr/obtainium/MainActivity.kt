@@ -715,103 +715,94 @@ class MainActivity : FlutterActivity() {
         val totalSize = apkFiles.sumOf { it.length() }
 
         Thread {
+            // Root check
             try {
-                val shell = Shell.getShell()
-                if (!shell.isRoot) {
-                    runOnUiThread {
-                        methodResult.error("INSTALL_ERROR", "Root access not available", null)
-                    }
-                    return@Thread
+                Shell.getShell()
+            } catch (e: Exception) {
+                runOnUiThread {
+                    methodResult.error("INSTALL_ERROR", "Failed to get root shell: ${e.message}", null)
                 }
-                val createCmd = StringBuilder("pm install-create -r -S $totalSize")
-                if (pretendToBeGooglePlay) {
-                    createCmd.append(" -i com.android.vending")
+                return@Thread
+            }
+
+            // Session creation
+            val createCmd = StringBuilder("pm install-create -r -S $totalSize")
+            if (pretendToBeGooglePlay) {
+                createCmd.append(" -i com.android.vending")
+            }
+
+            val createResult = Shell.cmd(createCmd.toString()).exec()
+            if (!createResult.isSuccess) {
+                runOnUiThread {
+                    methodResult.error("INSTALL_ERROR", createResult.out.joinToString("\n"), null)
                 }
+                return@Thread
+            }
 
-                val createResult = Shell.cmd(createCmd.toString()).exec()
-                if (!createResult.isSuccess) {
-                    runOnUiThread {
-                        methodResult.error("INSTALL_ERROR", createResult.out.joinToString("\n"), null)
-                    }
-                    return@Thread
+            val sessionId = createResult.out.firstOrNull()?.let { line: String ->
+                Regex("\\[(\\d+)]").find(line)?.groupValues?.get(1)
+            }
+            if (sessionId == null) {
+                runOnUiThread {
+                    methodResult.error("INSTALL_ERROR", "Failed to get session ID", null)
                 }
+                return@Thread
+            }
 
-                val sessionId = createResult.out.firstOrNull()?.let { line: String ->
-                    Regex("\\[(\\d+)]").find(line)?.groupValues?.get(1)
-                }
+            // Install logic
+            try {
+                for ((index, file) in apkFiles.withIndex()) {
+                    val size = file.length()
+                    val apkName = "base_$index"
+                    val stdoutOutput = StringBuilder()
+                    val stderrOutput = StringBuilder()
 
-                if (sessionId == null) {
-                    runOnUiThread {
-                        methodResult.error("INSTALL_ERROR", "Failed to get session ID", null)
-                    }
-                    return@Thread
-                }
+                    val process = Runtime.getRuntime().exec(
+                        arrayOf("su", "-c", "pm install-write -S $size $sessionId $apkName -")
+                    )
 
-                try {
-                    for ((index, file) in apkFiles.withIndex()) {
-                        val size = file.length()
-                        val apkName = "base_$index"
-                        val stdoutOutput = StringBuilder()
-                        val stderrOutput = StringBuilder()
-
-                        val process = Runtime.getRuntime().exec(
-                            arrayOf("su", "-c", "pm install-write -S $size $sessionId $apkName -")
-                        )
-
-                        val stdoutDrain = Thread {
-                            process.inputStream.bufferedReader().use {
-                                stdoutOutput.append(it.readText())
-                            }
+                    val stdoutDrain = Thread {
+                        process.inputStream.bufferedReader().use {
+                            stdoutOutput.append(it.readText())
                         }
-                        val stderrDrain = Thread {
-                            process.errorStream.bufferedReader().use {
-                                stderrOutput.append(it.readText())
-                            }
+                    }
+                    val stderrDrain = Thread {
+                        process.errorStream.bufferedReader().use {
+                            stderrOutput.append(it.readText())
                         }
-                        stdoutDrain.start()
-                        stderrDrain.start()
+                    }
+                    stdoutDrain.start()
+                    stderrDrain.start()
 
+                    try {
                         file.inputStream().use { it.copyTo(process.outputStream) }
                         process.outputStream.close()
 
                         val finished = process.waitFor(20, TimeUnit.SECONDS)
                         if (!finished) {
                             process.destroyForcibly()
-                            stdoutDrain.join(500)
-                            stderrDrain.join(500)
                             throw Exception("install-write timed out for $apkName")
                         }
-
-                        stdoutDrain.join()
-                        stderrDrain.join()
-
-                        if (process.exitValue() != 0) {
-                            val details = listOf(stdoutOutput, stderrOutput)
-                                .filter { it.isNotBlank() }
-                                .joinToString("\n")
-                                .ifBlank { "exit code ${process.exitValue()}" }
-                            throw Exception("Failed to write APK $apkName: $details")
-                        }
+                    } finally {
+                        stdoutDrain.join(500)
+                        stderrDrain.join(500)
                     }
 
-                    val commitResult = Shell.cmd("pm install-commit $sessionId").exec()
-                    if (commitResult.isSuccess) {
-                        runOnUiThread {
-                            methodResult.success(true)
-                        }
-                    } else {
-                        Shell.cmd("pm install-abandon $sessionId").exec()
-                        runOnUiThread {
-                            methodResult.error("INSTALL_ERROR", commitResult.out.joinToString("\n"), null)
-                        }
-                    }
-                } catch (e: Exception) {
-                    Shell.cmd("pm install-abandon $sessionId").exec()
-                    runOnUiThread {
-                        methodResult.error("INSTALL_ERROR", e.message, null)
+                    if (process.exitValue() != 0) {
+                        throw Exception("Failed to write APK $apkName (exit ${process.exitValue()}): ${stdoutOutput}${stderrOutput}".trim())
                     }
                 }
+
+                val commitResult = Shell.cmd("pm install-commit $sessionId").exec()
+                if (commitResult.isSuccess) {
+                    runOnUiThread {
+                        methodResult.success(true)
+                    }
+                } else {
+                    throw Exception("pm install-commit failed: ${commitResult.out.joinToString("\n")}")
+                }
             } catch (e: Exception) {
+                Shell.cmd("pm install-abandon $sessionId").exec()
                 runOnUiThread {
                     methodResult.error("INSTALL_ERROR", e.message, null)
                 }
