@@ -28,6 +28,7 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 private const val CHANNEL = "dev.imranr.obtainium/installer"
 private const val DEVICE_APPS_CHANNEL = "dev.imranr.obtainium/device_apps"
@@ -773,7 +774,14 @@ class MainActivity : FlutterActivity() {
                         file.inputStream().use { it.copyTo(process.outputStream) }
                         process.outputStream.close()
 
-                        process.waitFor()
+                        val finished = process.waitFor(20, TimeUnit.SECONDS)
+                        if (!finished) {
+                            process.destroyForcibly()
+                            stdoutDrain.join(500)
+                            stderrDrain.join(500)
+                            throw Exception("install-write timed out for $apkName")
+                        }
+
                         stdoutDrain.join()
                         stderrDrain.join()
 
