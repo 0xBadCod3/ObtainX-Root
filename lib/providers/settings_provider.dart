@@ -347,10 +347,14 @@ class SettingsProvider with ChangeNotifier {
   set activeCustomSeedHex(String value) {
     final String? normalized = normalizeCustomSeedHexOrNull(value);
     if (normalized == null) return;
+    _setActiveCustomSeedHexNormalized(normalized);
+    notifyListeners();
+  }
+
+  void _setActiveCustomSeedHexNormalized(String normalized) {
     prefs?.setString('activeCustomSeedHex', normalized);
     final Color? c = colorFromNormalizedHex(normalized);
     if (c != null) prefs?.setInt('themeColor', c.toARGB32());
-    notifyListeners();
   }
 
   List<String> get savedCustomSeedHexes {
@@ -364,8 +368,7 @@ class SettingsProvider with ChangeNotifier {
           .map((dynamic e) => normalizeCustomSeedHexOrNull(e.toString()))
           .whereType<String>()
           .toList();
-      if (out.isEmpty) return [activeCustomSeedHex];
-      return out;
+      return out.isNotEmpty ? out : [activeCustomSeedHex];
     } catch (_) {
       return [activeCustomSeedHex];
     }
@@ -389,8 +392,7 @@ class SettingsProvider with ChangeNotifier {
     final List<String> list = savedCustomSeedHexes.toList();
     if (!list.contains(normalized)) list.add(normalized);
     _persistSavedCustomSeedHexes(list);
-    activeCustomSeedHex = normalized;
-    appAccentColorSource = AppAccentColorSource.custom;
+    previewCustomSeedHex(normalized);
   }
 
   void removeCustomSeedHex(String raw) {
@@ -399,23 +401,28 @@ class SettingsProvider with ChangeNotifier {
     final List<String> list = savedCustomSeedHexes
         .where((String h) => h != normalized)
         .toList();
-    if (list.isEmpty) {
-      list.add(colorToCanonicalHex(obtainiumThemeColor));
-    }
     _persistSavedCustomSeedHexes(list);
     if (activeCustomSeedHex == normalized) {
-      prefs?.setString('activeCustomSeedHex', list.first);
-      final Color? c = colorFromNormalizedHex(list.first);
+      final String nextHex = list.isNotEmpty
+          ? list.first
+          : colorToCanonicalHex(obtainiumThemeColor);
+      prefs?.setString('activeCustomSeedHex', nextHex);
+      final Color? c = colorFromNormalizedHex(nextHex);
       if (c != null) prefs?.setInt('themeColor', c.toARGB32());
     }
     notifyListeners();
   }
 
   void selectSavedCustomSeedHex(String raw) {
+    previewCustomSeedHex(raw);
+  }
+
+  void previewCustomSeedHex(String raw) {
     final String? normalized = normalizeCustomSeedHexOrNull(raw);
     if (normalized == null) return;
-    activeCustomSeedHex = normalized;
-    appAccentColorSource = AppAccentColorSource.custom;
+    _setActiveCustomSeedHexNormalized(normalized);
+    prefs?.setString('appAccentColorSource', AppAccentColorSource.custom.name);
+    prefs?.setBool('useMaterialYou', false);
     notifyListeners();
   }
 
@@ -458,6 +465,16 @@ class SettingsProvider with ChangeNotifier {
 
   set useGradientBackground(bool value) {
     prefs?.setBool('useGradientBackground', value);
+    notifyListeners();
+  }
+
+  double get shadingIntensity {
+    return (prefs?.getDouble('shadingIntensity') ?? 1.0).clamp(0.0, 2.0);
+  }
+
+  set shadingIntensity(double value) {
+    final double steppedValue = ((value * 10).round() / 10).clamp(0.0, 2.0);
+    prefs?.setDouble('shadingIntensity', steppedValue);
     notifyListeners();
   }
 

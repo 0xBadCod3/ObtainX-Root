@@ -11,6 +11,7 @@ import 'package:fluttertoast/fluttertoast.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:obtainium/app_sources/apkmirror.dart';
 import 'package:obtainium/components/app_page_section_title.dart';
+import 'package:obtainium/components/category_action_chip.dart';
 import 'package:obtainium/pages/additional_options_page.dart';
 import 'package:obtainium/pages/page_route_slide_up.dart';
 import 'package:obtainium/theme/app_form_field_styles.dart';
@@ -42,6 +43,45 @@ String _formatBytes(int bytes) {
   } else {
     return '$bytes B';
   }
+}
+
+bool _isInstalledVersionPseudo(AppInMemory appInMemory) {
+  final App appModel = appInMemory.app;
+  final String? displayedInstalledVersion = appModel.installedVersion;
+  if (displayedInstalledVersion == null || displayedInstalledVersion.isEmpty) {
+    return false;
+  }
+
+  if (appModel.additionalSettings['trackOnly'] == true) {
+    return appInMemory.installedInfo == null &&
+        versionsEffectivelyEqual(
+          displayedInstalledVersion,
+          appModel.latestVersion,
+        );
+  }
+
+  if (!versionsEffectivelyEqual(
+    displayedInstalledVersion,
+    appModel.latestVersion,
+  )) {
+    return false;
+  }
+
+  final installedInfo = appInMemory.installedInfo;
+  if (installedInfo == null) {
+    return false;
+  }
+  final String? realInstalledVersion =
+      appModel.additionalSettings['useVersionCodeAsOSVersion'] == true
+      ? installedInfo.versionCode.toString()
+      : installedInfo.versionName;
+  if (realInstalledVersion == null || realInstalledVersion.isEmpty) {
+    return false;
+  }
+  return !versionsEffectivelyEqual(
+    realInstalledVersion,
+    displayedInstalledVersion,
+  );
 }
 
 /// Optional debug logger — guarded by the consolidated [apkMirrorSizeDebug]
@@ -89,12 +129,6 @@ class _MeasureSizeState extends State<_MeasureSize> {
     _lastReportedSize = currentSize;
     widget.onChange(currentSize);
   }
-}
-
-Color _labelColorOnCategoryFill(Color categoryFill) {
-  return categoryFill.computeLuminance() > 0.5
-      ? const Color(0xFF1A1A1A)
-      : const Color(0xFFF5F5F5);
 }
 
 /// True when [trackedUrl]'s host contains [hostFragment].
@@ -711,15 +745,11 @@ class _AppPageState extends State<AppPage> {
     final FilePickerResult? result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['png'],
-      withData: true,
     );
     if (!mounted) return;
     if (result == null || result.files.isEmpty) return;
     final PlatformFile picked = result.files.single;
-    Uint8List? bytes = picked.bytes;
-    if (bytes == null && picked.path != null) {
-      bytes = await File(picked.path!).readAsBytes();
-    }
+    final Uint8List? bytes = await _readPickedFileBytes(picked);
     if (bytes == null) return;
     if (!appsProvider.validateUserAppIconPngBytes(bytes)) {
       if (mounted) {
@@ -732,6 +762,20 @@ class _AppPageState extends State<AppPage> {
       _editStagedClearOverride = false;
       _editNonUserIconPreview = null;
     });
+  }
+
+  Future<Uint8List?> _readPickedFileBytes(PlatformFile picked) async {
+    try {
+      return await picked.readAsBytes();
+    } catch (_) {
+      final String? path = picked.path;
+      if (path == null) return null;
+      try {
+        return await File(path).readAsBytes();
+      } catch (_) {
+        return null;
+      }
+    }
   }
 
   Future<void> _onResetEditIconPressed(AppsProvider appsProvider) async {
@@ -933,6 +977,7 @@ class _AppPageState extends State<AppPage> {
             preselected: _editCategories.toSet(),
             alignment: WrapAlignment.start,
             showLabelWhenNotEmpty: false,
+            showSelectedCheckmark: true,
             onSelected: (cats) => setState(() => _editCategories = cats),
           ),
         ]),
@@ -1813,7 +1858,12 @@ class _AppPageState extends State<AppPage> {
       );
     }
 
-    Widget versionRow(BuildContext ctx, String label, String value) {
+    Widget versionRow(
+      BuildContext ctx,
+      String label,
+      String value, {
+      bool pseudoVersion = false,
+    }) {
       return Padding(
         padding: const EdgeInsets.only(bottom: 6),
         child: Row(
@@ -1834,13 +1884,41 @@ class _AppPageState extends State<AppPage> {
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: SelectableText(
-                value,
-                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                  fontFamily: 'monospace',
-                  fontWeight: FontWeight.w500,
-                  fontSize: 14,
-                ),
+              child: Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  SelectableText(
+                    value,
+                    style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                      fontFamily: 'monospace',
+                      fontWeight: FontWeight.w500,
+                      fontSize: 14,
+                      fontStyle: pseudoVersion ? FontStyle.italic : null,
+                    ),
+                  ),
+                  if (pseudoVersion)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Theme.of(
+                          ctx,
+                        ).colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        tr('pseudoVersion'),
+                        style: Theme.of(ctx).textTheme.labelSmall?.copyWith(
+                          color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           ],
@@ -2323,6 +2401,7 @@ class _AppPageState extends State<AppPage> {
               pageThemeContext,
               tr('installed'),
               app?.app.installedVersion ?? '',
+              pseudoVersion: app != null && _isInstalledVersionPseudo(app),
             ),
           );
         } else {
@@ -2635,49 +2714,19 @@ class _AppPageState extends State<AppPage> {
               Expanded(
                 child: (app?.app.categories ?? []).isEmpty
                     ? Text(tr('none'), style: detailsValueStyle)
-                    : Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
+                    : CategoryActionChipGroup(
                         alignment: WrapAlignment.start,
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           ...(app?.app.categories ?? []).map((categoryName) {
                             final colorArgb =
                                 settingsProvider.categories[categoryName];
-                            if (colorArgb != null) {
-                              final fill = Color(colorArgb);
-                              return Chip(
-                                label: Text(
-                                  categoryName,
-                                  style: TextStyle(
-                                    color: _labelColorOnCategoryFill(fill),
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                backgroundColor: fill,
-                                side: BorderSide.none,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 2,
-                                ),
-                                materialTapTargetSize:
-                                    MaterialTapTargetSize.shrinkWrap,
-                                visualDensity: VisualDensity.compact,
-                              );
-                            }
-                            return Chip(
-                              label: Text(
-                                categoryName,
-                                style: detailsValueStyle,
+                            return CategoryActionChip(
+                              label: categoryName,
+                              color: Color(
+                                colorArgb ?? Colors.grey.shade500.toARGB32(),
                               ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 4,
-                              ),
-                              materialTapTargetSize:
-                                  MaterialTapTargetSize.shrinkWrap,
-                              visualDensity: VisualDensity.compact,
+                              state: CategoryActionChipState.plain,
                             );
                           }),
                         ],

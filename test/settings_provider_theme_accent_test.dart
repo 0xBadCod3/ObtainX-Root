@@ -1,0 +1,60 @@
+import 'dart:convert';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:obtainium/providers/settings_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+Future<SettingsProvider> _settingsWithPrefs(Map<String, Object> values) async {
+  SharedPreferences.setMockInitialValues(values);
+  final SettingsProvider settings = SettingsProvider();
+  settings.prefs = await SharedPreferences.getInstance();
+  return settings;
+}
+
+void main() {
+  test(
+    'saved custom seed hexes fall back when all stored values are invalid',
+    () async {
+      final SettingsProvider settings = await _settingsWithPrefs(
+        <String, Object>{
+          'activeCustomSeedHex': '#123456',
+          'savedCustomSeedHexList': jsonEncode(<String>[
+            'not-a-color',
+            '#GGGGGG',
+          ]),
+        },
+      );
+
+      expect(settings.savedCustomSeedHexes, <String>['#123456']);
+    },
+  );
+
+  test('saved custom seed hexes keep valid stored values', () async {
+    final SettingsProvider settings = await _settingsWithPrefs(<String, Object>{
+      'activeCustomSeedHex': '#123456',
+      'savedCustomSeedHexList': jsonEncode(<String>['#ABCDEF', 'not-a-color']),
+    });
+
+    expect(settings.savedCustomSeedHexes, <String>['#ABCDEF']);
+  });
+
+  test('shading intensity defaults to current theme boost', () async {
+    final SettingsProvider settings = await _settingsWithPrefs(
+      <String, Object>{},
+    );
+
+    expect(settings.shadingIntensity, 1.0);
+  });
+
+  test('shading intensity is stepped and clamped', () async {
+    final SettingsProvider settings = await _settingsWithPrefs(
+      <String, Object>{},
+    );
+
+    settings.shadingIntensity = 2.35;
+    expect(settings.shadingIntensity, 2.0);
+
+    settings.shadingIntensity = 0.46;
+    expect(settings.shadingIntensity, 0.5);
+  });
+}

@@ -97,6 +97,42 @@ bool versionsEffectivelyEqual(String installed, String latest) {
   return false;
 }
 
+String? reconciledInstalledVersionFromLatest(
+  String installedVersion,
+  String latestVersion,
+) {
+  if (installedVersion == latestVersion ||
+      versionsEffectivelyEqual(installedVersion, latestVersion)) {
+    return latestVersion;
+  }
+  final reconciled = reconcileVersionDifferences(
+    installedVersion,
+    latestVersion,
+  );
+  if (reconciled == null) {
+    return null;
+  }
+  return reconciled.key ? reconciled.value : installedVersion;
+}
+
+String? reconciledInstalledVersionForDisabledVersionDetection(
+  String realInstalledVersion,
+  String reportedInstalledVersion,
+  String latestVersion,
+) {
+  return reconciledInstalledVersionFromLatest(
+        realInstalledVersion,
+        latestVersion,
+      ) ??
+      (reconcileVersionDifferences(
+                realInstalledVersion,
+                reportedInstalledVersion,
+              )?.key ==
+              false
+          ? realInstalledVersion
+          : null);
+}
+
 bool _isDigit(int codeUnit) => codeUnit >= 0x30 && codeUnit <= 0x39; // '0'..'9'
 
 DateTime? _dateFromReleaseDateVersionString(String version) {
@@ -521,6 +557,87 @@ Set<String> findStandardFormatsForVersion(String version, bool strict) {
     }
   }
   return results;
+}
+
+MapEntry<bool, String>? reconcileVersionDifferences(
+  String templateVersion,
+  String comparisonVersion,
+) {
+  // Returns null if the versions don't share a common standard format
+  // Returns <true, comparisonVersion> if they share a common format and are equal
+  // Returns <false, templateVersion> if they share a common format but are not equal
+  // templateVersion must fully match a standard format, while comparisonVersion can have a substring match
+  var templateVersionFormats = findStandardFormatsForVersion(
+    templateVersion,
+    true,
+  );
+  var comparisonVersionFormats = findStandardFormatsForVersion(
+    comparisonVersion,
+    true,
+  );
+  if (comparisonVersionFormats.isEmpty) {
+    comparisonVersionFormats = findStandardFormatsForVersion(
+      comparisonVersion,
+      false,
+    );
+  }
+  var commonStandardFormats = templateVersionFormats.intersection(
+    comparisonVersionFormats,
+  );
+  if (commonStandardFormats.isEmpty) {
+    return reconcileVersionDifferencesByShape(
+      templateVersion,
+      comparisonVersion,
+    );
+  }
+  for (String pattern in commonStandardFormats) {
+    if (doStringsMatchUnderRegEx(pattern, comparisonVersion, templateVersion)) {
+      return MapEntry(true, comparisonVersion);
+    }
+  }
+  return MapEntry(false, templateVersion);
+}
+
+MapEntry<bool, String>? reconcileVersionDifferencesByShape(
+  String templateVersion,
+  String comparisonVersion,
+) {
+  final String templateShape = versionShapeForReconciliation(templateVersion);
+  final String comparisonShape = versionShapeForReconciliation(
+    comparisonVersion,
+  );
+  if (templateShape.isEmpty || templateShape != comparisonShape) {
+    return null;
+  }
+  final templateTokens = numericVersionTokens(templateVersion);
+  final comparisonTokens = numericVersionTokens(comparisonVersion);
+  if (templateTokens.isEmpty ||
+      templateTokens.length != comparisonTokens.length) {
+    return null;
+  }
+  if (listEquals(templateTokens, comparisonTokens)) {
+    return MapEntry(true, comparisonVersion);
+  }
+  return MapEntry(false, templateVersion);
+}
+
+String versionShapeForReconciliation(String version) {
+  return version.trim().toLowerCase().replaceAll(RegExp(r'\d+'), '#');
+}
+
+List<int> numericVersionTokens(String version) {
+  return RegExp(
+    r'\d+',
+  ).allMatches(version).map((m) => int.tryParse(m.group(0)!) ?? 0).toList();
+}
+
+bool doStringsMatchUnderRegEx(String pattern, String value1, String value2) {
+  var r = RegExp(pattern);
+  var m1 = r.firstMatch(value1);
+  var m2 = r.firstMatch(value2);
+  return m1 != null && m2 != null
+      ? value1.substring(m1.start, m1.end) == value2.substring(m2.start, m2.end)
+      : false;
 }
 
 List<String> moveStrToEnd(List<String> arr, String str, {String? strB}) {
@@ -1146,6 +1263,7 @@ class AppsProvider with ChangeNotifier {
   /// survive Android "clear cache".
   late Directory userAppIconsDir;
   late SettingsProvider settingsProvider;
+  bool _receivesThirdPartyInstallEvents = false;
 
   Iterable<AppInMemory> getAppValues() => apps.values.map((a) => a.deepCopy());
 
@@ -1209,6 +1327,12 @@ class AppsProvider with ChangeNotifier {
 
   AppsProvider({bool isBg = false, SettingsProvider? sharedSettings}) {
     settingsProvider = sharedSettings ?? SettingsProvider();
+    if (!isBg) {
+      installer.registerThirdPartyInstallPackageChangedCallback(
+        _handleThirdPartyInstallPackageChanged,
+      );
+      _receivesThirdPartyInstallEvents = true;
+    }
     // Subscribe to changes in the app foreground status
     foregroundStream = FGBGEvents.instance.stream.asBroadcastStream();
     foregroundSubscription = foregroundStream?.listen((event) async {
@@ -1259,6 +1383,29 @@ class AppsProvider with ChangeNotifier {
             });
       }
     }();
+  }
+
+  Future<void> _handleThirdPartyInstallPackageChanged(
+    String packageName,
+  ) async {
+    final AppInMemory? appInMemory = apps[packageName];
+    if (appInMemory == null) return;
+    final PackageInfo? installedInfo = await getInstalledInfo(
+      packageName,
+      printErr: false,
+    );
+    if (installedInfo == null) return;
+    final App app = appInMemory.app.deepCopy();
+    app.installedVersion = app.latestVersion;
+    final correctedApp =
+        getCorrectedInstallStatusAppIfPossible(app, installedInfo) ?? app;
+    apps[packageName] = AppInMemory(
+      correctedApp,
+      appInMemory.downloadProgress,
+      installedInfo,
+      appInMemory.icon,
+    );
+    notifyListeners();
   }
 
   Future<File> handleAPKIDChange(
@@ -2583,28 +2730,39 @@ class AppsProvider with ChangeNotifier {
       }
       modded = true;
     }
+    if (realInstalledVersion != null &&
+        app.installedVersion != null &&
+        realInstalledVersion != app.installedVersion &&
+        !versionDetectionIsStandard) {
+      // Version detection can be disabled because the APK manifest version is
+      // not the source/release version. Still, an external install should be
+      // reflected when the manifest version can be reconciled with the source
+      // latest or the previous stored installed version; only unreconcilable
+      // pairs keep the source pseudo-version.
+      final correctedInstalledVersion =
+          reconciledInstalledVersionForDisabledVersionDetection(
+            realInstalledVersion,
+            app.installedVersion!,
+            app.latestVersion,
+          );
+      if (correctedInstalledVersion != null) {
+        app.installedVersion = correctedInstalledVersion;
+        modded = true;
+      }
+    }
     // SECOND, RECONCILE DIFFERENCES BETWEEN THE APP'S REPORTED AND REAL INSTALLED VERSIONS, WHERE NEITHER IS NULL
     if (realInstalledVersion != null &&
-        realInstalledVersion != app.installedVersion) {
-      var syncedFromDevice = false;
-      if (versionDetectionIsStandard) {
-        // App's reported version and real version don't match (and it uses standard version detection)
-        var correctedInstalledVersion = reconcileVersionDifferences(
-          realInstalledVersion,
-          app.installedVersion!,
-        );
-        if (correctedInstalledVersion?.key == false) {
-          app.installedVersion = correctedInstalledVersion!.value;
-          modded = true;
-          syncedFromDevice = true;
-        } else if (naiveStandardVersionDetection) {
-          app.installedVersion = realInstalledVersion;
-          modded = true;
-          syncedFromDevice = true;
-        }
-      }
-      if (!syncedFromDevice) {
-        // Device is source of truth; sync when reconciliation did not apply or failed (e.g. user updated via Play Store)
+        realInstalledVersion != app.installedVersion &&
+        versionDetectionIsStandard) {
+      // App's reported version and real version don't match (and it uses standard version detection)
+      var correctedInstalledVersion = reconcileVersionDifferences(
+        realInstalledVersion,
+        app.installedVersion!,
+      );
+      if (correctedInstalledVersion?.key == false) {
+        app.installedVersion = correctedInstalledVersion!.value;
+        modded = true;
+      } else if (naiveStandardVersionDetection) {
         app.installedVersion = realInstalledVersion;
         modded = true;
       }
@@ -2626,11 +2784,14 @@ class AppsProvider with ChangeNotifier {
     }
     // FOURTH, DISABLE VERSION DETECTION IF ENABLED AND THE REPORTED/REAL INSTALLED VERSIONS ARE NOT STANDARDIZED
     // Skip for track-only: do not set installedVersion = latestVersion, so "update available" can still show
-    // Do not disable when installed and latest are effectively equal (e.g. same commit hash); user may have enabled "reconcile" for that case
+    // Do not disable when the real device version and latest are effectively equal (e.g. same commit hash).
+    final bool realInstalledVersionMatchesLatest =
+        realInstalledVersion != null &&
+        versionsEffectivelyEqual(realInstalledVersion, app.latestVersion);
     if (!trackOnly &&
         installedInfo != null &&
         versionDetectionIsStandard &&
-        !versionsEffectivelyEqual(app.installedVersion!, app.latestVersion) &&
+        !realInstalledVersionMatchesLatest &&
         !isVersionDetectionPossible(
           AppInMemory(app, null, installedInfo, null),
         )) {
@@ -2645,56 +2806,6 @@ class AppsProvider with ChangeNotifier {
     }
 
     return modded ? app : null;
-  }
-
-  MapEntry<bool, String>? reconcileVersionDifferences(
-    String templateVersion,
-    String comparisonVersion,
-  ) {
-    // Returns null if the versions don't share a common standard format
-    // Returns <true, comparisonVersion> if they share a common format and are equal
-    // Returns <false, templateVersion> if they share a common format but are not equal
-    // templateVersion must fully match a standard format, while comparisonVersion can have a substring match
-    var templateVersionFormats = findStandardFormatsForVersion(
-      templateVersion,
-      true,
-    );
-    var comparisonVersionFormats = findStandardFormatsForVersion(
-      comparisonVersion,
-      true,
-    );
-    if (comparisonVersionFormats.isEmpty) {
-      comparisonVersionFormats = findStandardFormatsForVersion(
-        comparisonVersion,
-        false,
-      );
-    }
-    var commonStandardFormats = templateVersionFormats.intersection(
-      comparisonVersionFormats,
-    );
-    if (commonStandardFormats.isEmpty) {
-      return null;
-    }
-    for (String pattern in commonStandardFormats) {
-      if (doStringsMatchUnderRegEx(
-        pattern,
-        comparisonVersion,
-        templateVersion,
-      )) {
-        return MapEntry(true, comparisonVersion);
-      }
-    }
-    return MapEntry(false, templateVersion);
-  }
-
-  bool doStringsMatchUnderRegEx(String pattern, String value1, String value2) {
-    var r = RegExp(pattern);
-    var m1 = r.firstMatch(value1);
-    var m2 = r.firstMatch(value2);
-    return m1 != null && m2 != null
-        ? value1.substring(m1.start, m1.end) ==
-              value2.substring(m2.start, m2.end)
-        : false;
   }
 
   Future<void> loadApps({String? singleId}) async {
@@ -3801,9 +3912,7 @@ class AppsProvider with ChangeNotifier {
     }
     if (exportDir == null || pickOnly) {
       await settingsProvider.pickExportDir();
-      exportDir = await settingsProvider.getExportDir(
-        warnIfInaccessible: true,
-      );
+      exportDir = await settingsProvider.getExportDir(warnIfInaccessible: true);
     }
     if (exportDir == null) {
       return null;
@@ -3895,6 +4004,10 @@ class AppsProvider with ChangeNotifier {
     // Pending JSON under pending_removal/ is left on disk; the next [loadApps]
     // run commits removal via [_purgeStalePendingRemovalFilesWithoutLiveDeferral]
     // when no in-memory deferral tracks that id.
+    if (_receivesThirdPartyInstallEvents) {
+      installer.registerThirdPartyInstallPackageChangedCallback(null);
+      _receivesThirdPartyInstallEvents = false;
+    }
     foregroundSubscription?.cancel();
     super.dispose();
   }

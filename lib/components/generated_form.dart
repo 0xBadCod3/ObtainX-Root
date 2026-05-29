@@ -5,7 +5,9 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:obtainium/components/app_page_section_title.dart';
+import 'package:obtainium/components/category_action_chip.dart';
 import 'package:obtainium/components/generated_form_modal.dart';
+import 'package:obtainium/components/theme_accent_settings_section.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/theme/app_form_field_styles.dart';
 import 'package:obtainium/theme/app_page_icon_colors.dart';
@@ -178,6 +180,8 @@ class GeneratedFormTagInput extends GeneratedFormItem {
   /// When false, only category chips are shown (toggle selection). Add / edit /
   /// remove list controls are hidden.
   late bool allowTagManagement;
+  late bool showSelectedCheckmark;
+  late bool showChangeIntentIcons;
   GeneratedFormTagInput(
     super.key, {
     super.label,
@@ -192,6 +196,8 @@ class GeneratedFormTagInput extends GeneratedFormItem {
     this.emptyMessage = 'Input',
     this.showLabelWhenNotEmpty = true,
     this.allowTagManagement = true,
+    this.showSelectedCheckmark = false,
+    this.showChangeIntentIcons = true,
   });
 
   @override
@@ -213,6 +219,8 @@ class GeneratedFormTagInput extends GeneratedFormItem {
       emptyMessage: emptyMessage,
       showLabelWhenNotEmpty: showLabelWhenNotEmpty,
       allowTagManagement: allowTagManagement,
+      showSelectedCheckmark: showSelectedCheckmark,
+      showChangeIntentIcons: showChangeIntentIcons,
     );
   }
 }
@@ -419,44 +427,9 @@ Color generateRandomLightColor() {
   return Color.fromARGB(255, rgbValues[0], rgbValues[1], rgbValues[2]);
 }
 
-/// Builds a 5×12 palette using standard HSL for a smooth vivid→pastel gradient.
-/// Each row decreases saturation and increases lightness uniformly across all hues,
-/// so brightness fades gradually rather than in a perceptual-cliff jump.
-List<Color> _buildCategoryColorPalette() {
-  const hues = [
-    0.0,
-    30.0,
-    60.0,
-    90.0,
-    120.0,
-    150.0,
-    180.0,
-    210.0,
-    240.0,
-    270.0,
-    300.0,
-    330.0,
-  ];
-  // (saturation, lightness) pairs — vivid at top, pastel at bottom
-  const rows = [
-    (1.00, 0.50), // vivid/pure
-    (0.75, 0.64), // medium-vivid
-    (0.58, 0.72), // medium
-    (0.50, 0.76), // medium-soft (intermediate)
-    (0.42, 0.80), // pastel
-  ];
-  final palette = <Color>[];
-  for (final (sat, lig) in rows) {
-    for (final h in hues) {
-      palette.add(HSLColor.fromAHSL(1.0, h, sat, lig).toColor());
-    }
-  }
-  return palette;
-}
-
 /// Unified bottom-sheet for creating or editing a category.
-/// Label field with live chip preview at top, 5×12 color swatch grid below,
-/// hex input that auto-stages on valid input. Single "Save" button.
+/// Label field with live chip preview at top, shared color slider below,
+/// and a single sheet-level "Save" button.
 /// Returns ({Color color, String name}) or null if dismissed.
 class _CategoryColorPickerSheet extends StatefulWidget {
   const _CategoryColorPickerSheet({
@@ -473,65 +446,32 @@ class _CategoryColorPickerSheet extends StatefulWidget {
 
 class _CategoryColorPickerSheetState extends State<_CategoryColorPickerSheet> {
   late Color _staged;
-  Color? _paletteColor;
-  bool _hexError = false;
-  late final List<Color> _palette;
   late final TextEditingController _nameCtrl;
-  late final TextEditingController _hexCtrl;
-
-  static String _colorToHex(Color c) {
-    final v = c.toARGB32() & 0xFFFFFF;
-    return '#${v.toRadixString(16).padLeft(6, '0').toUpperCase()}';
-  }
 
   @override
   void initState() {
     super.initState();
-    _palette = _buildCategoryColorPalette();
     _staged = widget.initialColor;
     _nameCtrl = TextEditingController(text: widget.initialName);
-    _hexCtrl = TextEditingController(text: _colorToHex(_staged));
-    final match = _palette.where((c) => c.toARGB32() == _staged.toARGB32());
-    _paletteColor = match.isNotEmpty ? _staged : null;
   }
 
   @override
   void dispose() {
     _nameCtrl.dispose();
-    _hexCtrl.dispose();
     super.dispose();
   }
 
-  void _onHexChanged(String text) {
-    final clean = text.replaceFirst('#', '');
-    if (clean.length == 6) {
-      final value = int.tryParse(clean, radix: 16);
-      if (value != null) {
-        setState(() {
-          _staged = Color(0xFF000000 | value);
-          _paletteColor = null;
-          _hexError = false;
-        });
-        return;
-      }
-      setState(() => _hexError = true);
-    } else if (_hexError) {
-      setState(() => _hexError = false);
-    }
-  }
-
-  void _selectSwatch(Color color) {
+  void _stageHex(String hex) {
+    final String clean = hex.replaceFirst('#', '');
+    final int? value = int.tryParse(clean, radix: 16);
+    if (value == null) return;
     setState(() {
-      _staged = color;
-      _paletteColor = color;
-      _hexCtrl.text = _colorToHex(color);
-      _hexError = false;
+      _staged = Color(0xFF000000 | value);
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final name = _nameCtrl.text.trim();
     return SafeArea(
       child: Padding(
@@ -544,127 +484,17 @@ class _CategoryColorPickerSheetState extends State<_CategoryColorPickerSheet> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Label field + live chip preview
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _nameCtrl,
-                    autofocus: widget.initialName.isEmpty,
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: InputDecoration(
-                      labelText: tr('label'),
-                      border: const OutlineInputBorder(),
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 14,
-                      ),
-                    ),
-                    onChanged: (_) => setState(() {}),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                ChoiceChip(
-                  label: Text(name.isEmpty ? ' ' : name),
-                  selected: true,
-                  selectedColor: _staged,
-                  showCheckmark: false,
-                  labelStyle: TextStyle(
-                    color: _staged.computeLuminance() > 0.35
-                        ? Colors.black87
-                        : Colors.white,
-                  ),
-                  onSelected: (_) {},
-                ),
-              ],
+            CategoryEditorFields(
+              nameController: _nameCtrl,
+              color: _staged,
+              autofocusName: widget.initialName.isEmpty,
+              onNameChanged: (_) => setState(() {}),
+              onColorHexChanged: _stageHex,
             ),
             const SizedBox(height: 16),
-            // 5×12 swatch grid
-            GridView.count(
-              crossAxisCount: 12,
-              shrinkWrap: true,
-              mainAxisSpacing: 4,
-              crossAxisSpacing: 4,
-              physics: const NeverScrollableScrollPhysics(),
-              children: _palette.map((color) {
-                final bool selected =
-                    _paletteColor?.toARGB32() == color.toARGB32();
-                return GestureDetector(
-                  onTap: () => _selectSwatch(color),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: color,
-                      borderRadius: BorderRadius.circular(6),
-                      border: selected
-                          ? Border.all(
-                              color: theme.colorScheme.onSurface,
-                              width: 2.5,
-                            )
-                          : null,
-                    ),
-                    child: selected
-                        ? Icon(
-                            Icons.check_rounded,
-                            size: 14,
-                            color: color.computeLuminance() > 0.35
-                                ? Colors.black87
-                                : Colors.white,
-                          )
-                        : null,
-                  ),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 12),
-            // Hex input + Cancel + Save all in one row
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                SizedBox(
-                  width: 148,
-                  child: TextField(
-                    controller: _hexCtrl,
-                    decoration: InputDecoration(
-                      labelText: 'HEX',
-                      hintText: '#FF5733',
-                      errorText: _hexError ? tr('invalidInput') : null,
-                      isDense: true,
-                      border: const OutlineInputBorder(),
-                      prefixIcon: Padding(
-                        padding: const EdgeInsets.all(10),
-                        child: Container(
-                          width: 22,
-                          height: 22,
-                          decoration: BoxDecoration(
-                            color: _staged,
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(
-                              color: theme.colorScheme.outline,
-                              width: 1,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    inputFormatters: [
-                      TextInputFormatter.withFunction((old, updated) {
-                        var text = updated.text.toUpperCase();
-                        if (!text.startsWith('#')) text = '#$text';
-                        if (text.length > 7) return old;
-                        return updated.copyWith(
-                          text: text,
-                          selection: TextSelection.collapsed(
-                            offset: text.length,
-                          ),
-                        );
-                      }),
-                    ],
-                    onChanged: _onHexChanged,
-                  ),
-                ),
-                const Spacer(),
                 TextButton(
                   onPressed: () => Navigator.pop(context),
                   child: Text(tr('cancel')),
@@ -690,7 +520,7 @@ class _CategoryColorPickerSheetState extends State<_CategoryColorPickerSheet> {
 
 /// Opens [_CategoryColorPickerSheet] for creating or editing a category.
 /// Returns ({Color color, String name}) or null if dismissed.
-Future<({Color color, String name})?> _showCategorySheet(
+Future<({Color color, String name})?> showCategorySheet(
   BuildContext context, {
   required Color initialColor,
   required String initialName,
@@ -707,6 +537,295 @@ Future<({Color color, String name})?> _showCategorySheet(
       initialName: initialName,
     ),
   );
+}
+
+String categoryColorToHex(Color color) {
+  final value = color.toARGB32() & 0xFFFFFF;
+  return '#${value.toRadixString(16).padLeft(6, '0').toUpperCase()}';
+}
+
+class CategoryEditorFields extends StatelessWidget {
+  const CategoryEditorFields({
+    super.key,
+    required this.nameController,
+    required this.color,
+    required this.onNameChanged,
+    required this.onColorHexChanged,
+    this.autofocusName = false,
+  });
+
+  final TextEditingController nameController;
+  final Color color;
+  final ValueChanged<String> onNameChanged;
+  final ValueChanged<String> onColorHexChanged;
+  final bool autofocusName;
+  static const int nameMaxLength = 20;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    final String hex = categoryColorToHex(color);
+    final BorderRadius fieldRadius = BorderRadius.circular(12);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: nameController,
+                autofocus: autofocusName,
+                textCapitalization: TextCapitalization.sentences,
+                inputFormatters: [
+                  LengthLimitingTextInputFormatter(nameMaxLength),
+                ],
+                decoration:
+                    appPageOutlinedInputDecoration(
+                      context,
+                      labelText: null,
+                      hintText: tr('label'),
+                      isDense: true,
+                    ).copyWith(
+                      suffixText:
+                          '${nameController.text.length}/$nameMaxLength',
+                      border: OutlineInputBorder(borderRadius: fieldRadius),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: fieldRadius,
+                        borderSide: BorderSide(
+                          color: scheme.outline.withValues(alpha: 0.45),
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: fieldRadius,
+                        borderSide: BorderSide(color: scheme.primary),
+                      ),
+                    ),
+                onChanged: onNameChanged,
+              ),
+            ),
+            const SizedBox(width: 12),
+            _CategoryHexChip(
+              hex: hex,
+              color: color,
+              onHexChanged: onColorHexChanged,
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        CustomHueColorSlider(
+          seedHex: hex,
+          onPreviewColor: onColorHexChanged,
+          onSaveColor: onColorHexChanged,
+          gapColor: scheme.surfaceContainerLow,
+        ),
+      ],
+    );
+  }
+}
+
+class _CategoryHexChip extends StatelessWidget {
+  const _CategoryHexChip({
+    required this.hex,
+    required this.color,
+    required this.onHexChanged,
+  });
+
+  final String hex;
+  final Color color;
+  final ValueChanged<String> onHexChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return _EditableCategoryHexChip(
+      hex: hex,
+      color: color,
+      onHexChanged: onHexChanged,
+    );
+  }
+}
+
+class _EditableCategoryHexChip extends StatefulWidget {
+  const _EditableCategoryHexChip({
+    required this.hex,
+    required this.color,
+    required this.onHexChanged,
+  });
+
+  final String hex;
+  final Color color;
+  final ValueChanged<String> onHexChanged;
+
+  @override
+  State<_EditableCategoryHexChip> createState() =>
+      _EditableCategoryHexChipState();
+}
+
+class _EditableCategoryHexChipState extends State<_EditableCategoryHexChip> {
+  late final TextEditingController _controller;
+  final FocusNode _focusNode = FocusNode();
+  final Object _tapRegionGroup = Object();
+  bool _editing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.hex);
+  }
+
+  @override
+  void didUpdateWidget(covariant _EditableCategoryHexChip oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_editing && oldWidget.hex != widget.hex) {
+      _controller.text = widget.hex;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _startEditing() {
+    setState(() {
+      _editing = true;
+      _controller.text = widget.hex;
+      _controller.selection = TextSelection(
+        baseOffset: 1,
+        extentOffset: _controller.text.length,
+      );
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusNode.requestFocus();
+    });
+  }
+
+  void _commitEditing() {
+    final normalized = _normalizeCategoryHexInput(_controller.text);
+    if (normalized != null) {
+      widget.onHexChanged(normalized);
+      _controller.text = normalized;
+    } else {
+      _controller.text = widget.hex;
+    }
+    setState(() {
+      _editing = false;
+    });
+  }
+
+  void _handleHexChanged(String value) {
+    final normalized = _normalizeCategoryHexInput(value);
+    if (normalized != null) {
+      widget.onHexChanged(normalized);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool colorIsLight = widget.color.computeLuminance() > 0.35;
+    final Color foreground = colorIsLight ? Colors.black87 : Colors.white;
+    final textStyle = Theme.of(context).textTheme.labelLarge?.copyWith(
+      color: foreground,
+      fontFamily: 'monospace',
+      fontWeight: FontWeight.w800,
+    );
+    return TapRegion(
+      groupId: _tapRegionGroup,
+      onTapOutside: (_) {
+        if (_editing) _commitEditing();
+      },
+      child: SizedBox(
+        width: 104,
+        height: 48,
+        child: Material(
+          color: widget.color,
+          shape: const StadiumBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: _editing ? null : _startEditing,
+            customBorder: const StadiumBorder(),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Center(
+                child: _editing
+                    ? TextField(
+                        controller: _controller,
+                        focusNode: _focusNode,
+                        inputFormatters: [_CategoryHexInputFormatter()],
+                        maxLines: 1,
+                        autofocus: true,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        textCapitalization: TextCapitalization.characters,
+                        keyboardType: TextInputType.text,
+                        textInputAction: TextInputAction.done,
+                        textAlign: TextAlign.center,
+                        cursorColor: foreground,
+                        style: textStyle,
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                          counterText: '',
+                          isCollapsed: true,
+                        ),
+                        onChanged: _handleHexChanged,
+                        onEditingComplete: _commitEditing,
+                      )
+                    : Text(widget.hex, maxLines: 1, style: textStyle),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String? _normalizeCategoryHexInput(String raw) {
+  final clean = raw.startsWith('#') ? raw.substring(1) : raw;
+  if (!RegExp(r'^[0-9a-fA-F]{6}$').hasMatch(clean)) return null;
+  return '#${clean.toUpperCase()}';
+}
+
+class _CategoryHexInputFormatter extends TextInputFormatter {
+  static final RegExp _validHex = RegExp(r'^[0-9a-fA-F]*$');
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    String nextText = newValue.text.toUpperCase();
+    if (nextText.isNotEmpty && !nextText.startsWith('#')) {
+      nextText = '#$nextText';
+    }
+    final cleanText = nextText.startsWith('#')
+        ? nextText.substring(1)
+        : nextText;
+    if (cleanText.length > 6 || !_validHex.hasMatch(cleanText)) {
+      HapticFeedback.vibrate();
+      SystemSound.play(SystemSoundType.alert);
+      return oldValue;
+    }
+
+    int clampOffset(int offset) {
+      final prefixOffset =
+          newValue.text.isNotEmpty && !newValue.text.startsWith('#') ? 1 : 0;
+      return (offset + prefixOffset).clamp(0, nextText.length).toInt();
+    }
+
+    return TextEditingValue(
+      text: nextText,
+      selection: TextSelection(
+        baseOffset: clampOffset(newValue.selection.baseOffset),
+        extentOffset: clampOffset(newValue.selection.extentOffset),
+        affinity: newValue.selection.affinity,
+        isDirectional: newValue.selection.isDirectional,
+      ),
+      composing: TextRange.empty,
+    );
+  }
 }
 
 int generateRandomNumber(
@@ -879,6 +998,7 @@ class _GeneratedFormState extends State<GeneratedForm> {
   List<List<Widget>> rows = [];
   int forceUpdateKeyCount = 0;
   final Map<String, TextEditingController> _textFieldControllers = {};
+  final Map<String, Map<String, MapEntry<int, bool>>> _initialTagValues = {};
 
   void _disposeTextFieldControllers() {
     for (final TextEditingController controller
@@ -920,14 +1040,19 @@ class _GeneratedFormState extends State<GeneratedForm> {
 
   void initForm() {
     _disposeTextFieldControllers();
+    _initialTagValues.clear();
     // Initialize form values as all empty
     values.clear();
     for (var row in widget.items) {
       for (var e in row) {
         if (e is GeneratedFormSectionHeader) continue;
         if (e is GeneratedFormTagInput) {
-          values[e.key] = cloneCategoryTagInputValueMap(
+          final initialValue = cloneCategoryTagInputValueMap(
             e.defaultValue as Map<String, MapEntry<int, bool>>?,
+          );
+          values[e.key] = initialValue;
+          _initialTagValues[e.key] = cloneCategoryTagInputValueMap(
+            initialValue,
           );
         } else {
           values[e.key] = e.defaultValue;
@@ -1214,7 +1339,7 @@ class _GeneratedFormState extends State<GeneratedForm> {
           final tagInput = widget.items[r][e] as GeneratedFormTagInput;
           onAddPressed() async {
             // ignore: use_build_context_synchronously
-            final result = await _showCategorySheet(
+            final result = await showCategorySheet(
               context,
               initialColor: generateRandomLightColor(),
               initialName: '',
@@ -1254,7 +1379,7 @@ class _GeneratedFormState extends State<GeneratedForm> {
                     const SizedBox(height: 8),
                   ],
                 ),
-              Wrap(
+              CategoryActionChipGroup(
                 alignment:
                     (widget.items[r][e] as GeneratedFormTagInput).alignment,
                 crossAxisAlignment: WrapCrossAlignment.center,
@@ -1262,6 +1387,27 @@ class _GeneratedFormState extends State<GeneratedForm> {
                   ...(values[fieldKey] as Map<String, MapEntry<int, bool>>?)
                           ?.entries
                           .map((e2) {
+                            final bool originallySelected =
+                                _initialTagValues[fieldKey]?[e2.key]?.value ??
+                                false;
+                            final bool currentlySelected = e2.value.value;
+                            final CategoryActionChipState selectedState =
+                                tagInput.showSelectedCheckmark
+                                ? CategoryActionChipState.checked
+                                : CategoryActionChipState.plain;
+                            final CategoryActionChipState chipState =
+                                tagInput.showChangeIntentIcons
+                                ? (originallySelected
+                                      ? (currentlySelected
+                                            ? selectedState
+                                            : CategoryActionChipState.remove)
+                                      : (currentlySelected
+                                            ? CategoryActionChipState.add
+                                            : CategoryActionChipState.muted))
+                                : (currentlySelected
+                                      ? selectedState
+                                      : CategoryActionChipState.muted);
+
                             void onCategoryChipSelected(bool newValue) {
                               setState(() {
                                 final Map<String, MapEntry<int, bool>> map =
@@ -1282,30 +1428,15 @@ class _GeneratedFormState extends State<GeneratedForm> {
                               someValueChanged();
                             }
 
-                            final Color chipColor = Color(e2.value.key);
-                            final bool lightChip =
-                                chipColor.computeLuminance() > 0.35;
-                            final TextStyle chipLabelStyle = TextStyle(
-                              color: lightChip ? Colors.black87 : Colors.white,
-                            );
-                            final Color checkColor = lightChip
-                                ? Colors.black87
-                                : Colors.white;
-                            return Padding(
+                            return KeyedSubtree(
                               key: ValueKey<String>('category_chip_${e2.key}'),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                              ),
-                              child: FilterChip(
-                                label: Text(e2.key),
-                                backgroundColor: chipColor,
-                                selectedColor: chipColor,
-                                labelStyle: chipLabelStyle,
-                                showCheckmark: true,
-                                checkmarkColor: checkColor,
-                                visualDensity: VisualDensity.compact,
-                                selected: e2.value.value,
-                                onSelected: onCategoryChipSelected,
+                              child: CategoryActionChip(
+                                label: e2.key,
+                                color: Color(e2.value.key),
+                                state: chipState,
+                                onPressed: () {
+                                  onCategoryChipSelected(!currentlySelected);
+                                },
                               ),
                             );
                           }) ??
@@ -1327,7 +1458,7 @@ class _GeneratedFormState extends State<GeneratedForm> {
                                   (e) => e.value.value,
                                 );
                                 // ignore: use_build_context_synchronously
-                                final result = await _showCategorySheet(
+                                final result = await showCategorySheet(
                                   context,
                                   initialColor: Color(oldEntry.value.key),
                                   initialName: oldEntry.key,
