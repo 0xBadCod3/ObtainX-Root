@@ -28,6 +28,7 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 private const val CHANNEL = "dev.imranr.obtainium/installer"
@@ -774,22 +775,24 @@ class MainActivity : FlutterActivity() {
                     stdoutDrain.start()
                     stderrDrain.start()
 
-                    try {
-                        file.inputStream().use { it.copyTo(process.outputStream) }
-                        process.outputStream.close()
-
-                        val finished = process.waitFor(20, TimeUnit.SECONDS)
-                        if (!finished) {
-                            process.destroyForcibly()
-                            throw Exception("install-write timed out for $apkName")
+                    val timeoutSeconds = 30L + (size / (1024 * 1024 * 10))
+                    val writeToProcess = CompletableFuture.runAsync {
+                        try {
+                            file.inputStream().use { it.copyTo(process.outputStream) }
+                        } finally {
+                            runCatching { process.outputStream.close() }
                         }
+                        process.waitFor()
+                    }
+
+                    try {
+                        writeToProcess.get(timeoutSeconds, TimeUnit.SECONDS)
+                    } catch (e: Exception) {
+                        process.destroyForcibly()
+                        throw Exception("install-write failed for $apkName")
                     } finally {
                         stdoutDrain.join(500)
                         stderrDrain.join(500)
-                    }
-
-                    if (process.exitValue() != 0) {
-                        throw Exception("Failed to write APK $apkName (exit ${process.exitValue()}): ${stdoutOutput}${stderrOutput}".trim())
                     }
                 }
 
